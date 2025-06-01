@@ -3031,7 +3031,9 @@ class MainWindow(QMainWindow):
     from datetime import datetime
 
     def on_update_events(self):
-        items = [it for it in self.scene.selectedItems() if isinstance(it, EventItem)]
+        # Grab all selected EventItem objects
+        items = [it for it in self.scene.selectedItems()
+                 if isinstance(it, EventItem)]
         if not items:
             QMessageBox.warning(self, "No Selection", "Select one or more events to update travel times.")
             return
@@ -3039,20 +3041,21 @@ class MainWindow(QMainWindow):
         updated = 0
         for ev in items:
             raw = ev.link  # e.g. "https://maps.app.goo.gl/PyfeXm6hR6VEShDL6"
+
+            # ─── ① If there's no link, skip ───────────────────────────
             if not raw:
                 print(f"[DEBUG] Skipping item because no link: link='{raw}'")
                 continue
 
-            # ─── ① Expand ANY short link or consent redirect ────────────
-            if raw.startswith("https://maps.app.goo.gl"):
-                long_url = expand_and_unwrap_consent(raw)
-            else:
-                # Even if it’s already a google.com URL, it might be a consent wrapper, so still unwrap:
-                long_url = expand_and_unwrap_consent(raw)
+            # ─── ② Expand short link AND handle a possible consent redirect ─
+            long_url = expand_and_unwrap_consent(raw)
 
-            # ─── ② Now reject if it doesn’t contain '/maps/dir/' ─────────
+            # ─── ③ If it still doesn’t contain '/maps/dir/', skip ───────
             if "/maps/dir/" not in long_url:
-                print(f"[DEBUG] Skipping item because not a directions-link: link='{raw}'  expanded_to='{long_url}'")
+                print(
+                    f"[DEBUG] Skipping item because not a directions-link:\n"
+                    f"   original='{raw}'\n   expanded_to='{long_url}'"
+                )
                 continue
 
             p = urlparse(long_url)
@@ -3068,7 +3071,7 @@ class MainWindow(QMainWindow):
                     origin = origin or (parts[idx + 1] if len(parts) > idx + 1 else None)
                     dest = dest or (parts[idx + 2] if len(parts) > idx + 2 else None)
             if not origin or not dest:
-                QMessageBox.warning(self, "Parse Error", f"Cannot get origin/dest from {long_url}")
+                print(f"[DEBUG] Cannot get origin/dest from {long_url}")
                 continue
 
             # choose mode based on the event type, not the URL
