@@ -3137,6 +3137,102 @@ class MainWindow(QMainWindow):
 
         raise RuntimeError(f"Could not resolve coords for “{name}”")
 
+    def fetch_all_routes(self, lat1, lng1, lat2, lng2, departure_ts,
+                         avoid_highways=False, avoid_tolls=False):
+        """Return available routes for driving, transit and walking."""
+        routes = {"driving": [], "transit": [], "walking": []}
+
+        avoid = []
+        if avoid_highways:
+            avoid.append("highways")
+        if avoid_tolls:
+            avoid.append("tolls")
+        avoid_param = "|".join(avoid) if avoid else None
+
+        modes = {
+            "walking": {},
+            "transit": {"transit_mode": ["bus"], "departure_time": departure_ts},
+            "driving": {"departure_time": departure_ts},
+        }
+        if avoid_param:
+            modes["driving"]["avoid"] = avoid_param
+
+        for mode, params in modes.items():
+            try:
+                resp = self.gmaps.directions(
+                    (lat1, lng1), (lat2, lng2),
+                    mode=mode, alternatives=True, **params
+                )
+            except Exception:
+                resp = []
+            for r in resp:
+                leg = r["legs"][0]
+                routes[mode].append({
+                    "duration": leg["duration"]["value"],
+                    "distance": leg["distance"]["value"],
+                    "summary": r.get("summary", ""),
+                    "raw": r,
+                })
+
+        return routes
+
+    def create_route_event(self, first_event, second_event,
+                           mode, route_info,
+                           avoid_highways=False, avoid_tolls=False):
+        """Create and insert a travel EventItem based on route_info."""
+        departure = self.get_event_end_timestamp(first_event)
+        a_end = QDateTime.fromSecsSinceEpoch(departure)
+
+        lat1, lng1 = self.get_event_coordinates(first_event)
+        lat2, lng2 = self.get_event_coordinates(second_event)
+
+        dur_sec = route_info.get("duration", 0)
+        dur_min = math.ceil(dur_sec / 60)
+
+        title = f"{mode.title()} → {second_event.text.toPlainText()}"
+
+        route_url = (
+            "https://www.google.com/maps/dir/?api=1"
+            f"&origin={lat1},{lng1}"
+            f"&destination={lat2},{lng2}"
+            f"&travelmode={mode}"
+            f"&departure_time={departure}"
+        )
+        if avoid_highways or avoid_tolls:
+            parts = []
+            if avoid_highways:
+                parts.append("highways")
+            if avoid_tolls:
+                parts.append("tolls")
+            route_url += "&avoid=" + "|".join(parts)
+
+        new_col = self.scene.start_date.daysTo(a_end.date())
+        new_row = ((a_end.time().hour() * 60 + a_end.time().minute() - START_HOUR * 60)
+                   // self.scene.slot_minutes)
+        x = TIME_LABEL_WIDTH + new_col * self.scene.cell_w
+        h = (dur_min / self.scene.slot_minutes) * self.scene.cell_h
+
+        rect = QRectF(0, 0, self.scene.cell_w, h)
+        leg_item = EventItem(rect, title, QColor("#ADE1F9"))
+        leg_item.link = route_url
+        leg_item.event_type = mode
+        leg_item.setPos(x, HEADER_HEIGHT + new_row * self.scene.cell_h)
+        self.scene.addItem(leg_item)
+
+        if self.current_schedule_id:
+            leg_item.db_id = self.db.insert_event(
+                self.current_schedule_id,
+                title, "",
+                a_end,
+                a_end.addSecs(dur_min * 60),
+                dur_min,
+                route_url, "", "",
+                mode, 0.0,
+                "#ADE1F9",
+                x, HEADER_HEIGHT + new_row * self.scene.cell_h,
+                self.scene.cell_w, h
+            )
+
     def on_add_route(self):
         # 1) require exactly two events selected
         #
@@ -3151,124 +3247,31 @@ class MainWindow(QMainWindow):
             return
         a, b = sorted(items, key=lambda ev: (ev.pos().x(), ev.pos().y()))
 
-        # 3) resolve origin & destination
+        # After sorting events so first_event / second_event are set…
         try:
-            lat1, lng1 = self.get_event_coordinates(a)
-            lat2, lng2 = self.get_event_coordinates(b)
+            dialog = RouteOptionsDialog(self, a, b)
         except RuntimeError as e:
             QMessageBox.critical(self, "Routing Error", str(e))
             return
+        result = dialog.exec_()
+        if result != QDialog.Accepted:
+            return  # user cancelled
 
-        # 1) figure out when event A ends and convert to a UNIX timestamp
-        departure = self.get_event_end_timestamp(a)
-        a_end = QDateTime.fromSecsSinceEpoch(departure)
+        choice = dialog.get_selected_route()
+        if choice is None:
+            return  # no route selected
 
-        modes = {
-            "walking": {"label": "Walking", "params": {}},
-            "transit": {
-                "label": "Bus",
-                "params": {
-                    "transit_mode": ["bus"],
-                    "departure_time": departure
-                }
-            },
-            "driving": {
-                "label": "Driving",
-                "params": {
-                    "departure_time": departure
-                }
-            },
-        }
+        # Unpack the selection
+        mode = choice['mode']
+        route_info = choice['route']
+        avoid_highways = choice['avoid_highways']
+        avoid_tolls = choice['avoid_tolls']
 
-        print("[DEBUG] Fetching routes for:", modes)
-        print(f"[DEBUG] Departure time: {departure} ({datetime.fromtimestamp(departure)})")
-        print("[DEBUG] Origin:", (lat1, lng1), "→ Destination:", (lat2, lng2))
-        print("[DEBUG] Event A end time:", a_end.toString())
-        print("[DEBUG] Event B text:", b.text.toPlainText())
-        print("[DEBUG] Driving params:", modes["driving"]["params"])
-        print("[DEBUG] Transit params:", modes["transit"]["params"])
-        print("[DEBUG] Walking params:", modes["walking"]["params"])
-
-        best = {}
-        for mode, info in modes.items():
-            try:
-                routes = self.gmaps.directions(
-                    (lat1, lng1),
-                    (lat2, lng2),
-                    mode=mode,
-                    alternatives=True,
-                    **info["params"]
-                )
-            except Exception:
-                continue
-            if not routes:
-                continue
-            fastest = min(routes, key=lambda r: r["legs"][0]["duration"]["value"])
-            leg = fastest["legs"][0]
-            best[mode] = {
-                "route": fastest,
-                "seconds": leg["duration"]["value"],
-                "label": info["label"]
-            }
-
-        if not best:
-            QMessageBox.warning(self, "No Routes", "No walking, bus or driving routes found.")
-            return
-
-        # 5) apply your priority rules
-        chosen = None
-        if "walking" in best and best["walking"]["seconds"] <= 10 * 60:
-            chosen = best["walking"]
-        else:
-            if "transit" in best:
-                chosen = best["transit"]
-            if "driving" in best and "transit" in best:
-                bus = best["transit"]["seconds"]
-                drv = best["driving"]["seconds"]
-                if drv * 1.3 <= bus:
-                    chosen = best["driving"]
-            if chosen is None and "driving" in best:
-                chosen = best["driving"]
-
-        # 6) drop it onto your calendar just like before
-        label = chosen["label"]
-        dur_min = math.ceil(chosen["seconds"] / 60)
-        title = f"{label} → {b.text.toPlainText()}"
-
-        route_url = (
-            "https://www.google.com/maps/dir/?api=1"
-            f"&origin={lat1},{lng1}"
-            f"&destination={lat2},{lng2}"
-            f"&travelmode={label.lower()}"
-            f"&departure_time={departure}"
+        self.create_route_event(
+            a, b,
+            mode, route_info,
+            avoid_highways, avoid_tolls
         )
-
-        # compute insert‐point using the helper-derived end time
-        new_col = self.scene.start_date.daysTo(a_end.date())
-        new_row = ((a_end.time().hour() * 60 + a_end.time().minute()
-                    - START_HOUR * 60) // self.scene.slot_minutes)
-        x = TIME_LABEL_WIDTH + new_col * self.scene.cell_w
-        h = (dur_min / self.scene.slot_minutes) * self.scene.cell_h
-
-        rect = QRectF(0, 0, self.scene.cell_w, h)
-        leg_item = EventItem(rect, title, QColor("#ADE1F9"))
-        leg_item.link = route_url
-        leg_item.setPos(x, HEADER_HEIGHT + new_row * self.scene.cell_h)
-        self.scene.addItem(leg_item)
-
-        if self.current_schedule_id:
-            leg_item.db_id = self.db.insert_event(
-                self.current_schedule_id,
-                title, "",  # no description
-                a_end,
-                a_end.addSecs(dur_min * 60),
-                dur_min,
-                route_url, "", "",
-                label.lower(), 0.0,
-                "#ADE1F9",
-                x, HEADER_HEIGHT + new_row * self.scene.cell_h,
-                self.scene.cell_w, h
-            )
 
 class RouteOptionsDialog(QDialog):
     def __init__(self, parent, eventA, eventB):
