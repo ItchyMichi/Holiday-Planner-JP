@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (
 
 from PyQt5.QtWidgets import QStyledItemDelegate, QDateEdit, QTimeEdit, QSpinBox, QDoubleSpinBox, QCheckBox
 from PyQt5.QtCore import QDate, QTime, Qt
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 import sys
 import traceback
 import uuid
@@ -93,8 +93,8 @@ from PyQt5.QtWidgets import QGraphicsView
 
 URL_RE = re.compile(r'https?://\S+')
 
-def expand_short_link(short_url):
-    """Perform a GET with redirects to expand any short maps.app.goo.gl link."""
+def expand_and_unwrap_consent(short_url):
+    """Follow redirects and unwrap any consent.google.com redirect."""
     try:
         resp = requests.get(
             short_url,
@@ -102,10 +102,24 @@ def expand_short_link(short_url):
             timeout=5,
             headers={"User-Agent": "Mozilla/5.0"}
         )
-        return resp.url
     except Exception:
-        # If expansion fails, return the original URL
         return short_url
+
+    final_url = resp.url
+    parsed = urlparse(final_url)
+
+    if parsed.netloc.endswith("consent.google.com"):
+        qs = parse_qs(parsed.query)
+        continue_list = qs.get("continue", None)
+        if continue_list:
+            real_maps = unquote(continue_list[0])
+            return real_maps
+
+    return final_url
+
+def expand_short_link(short_url):
+    """Expand short links and unwrap any consent.google.com redirect."""
+    return expand_and_unwrap_consent(short_url)
 
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QFileDialog
 
