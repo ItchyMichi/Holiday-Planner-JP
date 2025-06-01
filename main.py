@@ -3176,61 +3176,78 @@ class MainWindow(QMainWindow):
 
         return routes
 
-    def create_route_event(self, first_event, second_event,
-                           mode, route_info,
+    def create_route_event(self, eventA, eventB, mode, route_info,
                            avoid_highways=False, avoid_tolls=False):
-        """Create and insert a travel EventItem based on route_info."""
-        departure = self.get_event_end_timestamp(first_event)
-        a_end = QDateTime.fromSecsSinceEpoch(departure)
+        """Create and insert a travel EventItem based on ``route_info``."""
 
-        lat1, lng1 = self.get_event_coordinates(first_event)
-        lat2, lng2 = self.get_event_coordinates(second_event)
+        # 1) starting point is the end of eventA
+        departure_ts = self.get_event_end_timestamp(eventA)
+        dt_start = QDateTime.fromSecsSinceEpoch(departure_ts)
 
-        dur_sec = route_info.get("duration", 0)
-        dur_min = math.ceil(dur_sec / 60)
+        # 2) duration
+        duration_secs = route_info.get("duration", 0)
+        duration_minutes = math.ceil(duration_secs / 60)
 
-        title = f"{mode.title()} → {second_event.text.toPlainText()}"
+        # 3) compute end time
+        dt_end = dt_start.addSecs(duration_secs)
+
+        # 4) build Google Maps URL
+        lat1, lng1 = self.get_event_coordinates(eventA)
+        lat2, lng2 = self.get_event_coordinates(eventB)
 
         route_url = (
             "https://www.google.com/maps/dir/?api=1"
             f"&origin={lat1},{lng1}"
             f"&destination={lat2},{lng2}"
             f"&travelmode={mode}"
-            f"&departure_time={departure}"
+            f"&departure_time={departure_ts}"
         )
-        if avoid_highways or avoid_tolls:
-            parts = []
-            if avoid_highways:
-                parts.append("highways")
-            if avoid_tolls:
-                parts.append("tolls")
-            route_url += "&avoid=" + "|".join(parts)
 
-        new_col = self.scene.start_date.daysTo(a_end.date())
-        new_row = ((a_end.time().hour() * 60 + a_end.time().minute() - START_HOUR * 60)
+        if mode == "driving":
+            avoids = []
+            if avoid_highways:
+                avoids.append("highways")
+            if avoid_tolls:
+                avoids.append("tolls")
+            if avoids:
+                route_url += "&avoid=" + "|".join(avoids)
+
+        # 5) create the EventItem
+        title = f"{mode.capitalize()} → {eventB.text.toPlainText()}"
+        travel_color = QColor("#ADE1F9")
+
+        new_col = self.scene.start_date.daysTo(dt_start.date())
+        new_row = ((dt_start.time().hour() * 60 + dt_start.time().minute() - START_HOUR * 60)
                    // self.scene.slot_minutes)
         x = TIME_LABEL_WIDTH + new_col * self.scene.cell_w
-        h = (dur_min / self.scene.slot_minutes) * self.scene.cell_h
+        h = (duration_minutes / self.scene.slot_minutes) * self.scene.cell_h
 
         rect = QRectF(0, 0, self.scene.cell_w, h)
-        leg_item = EventItem(rect, title, QColor("#ADE1F9"))
+        leg_item = EventItem(rect, title, travel_color)
         leg_item.link = route_url
         leg_item.event_type = mode
         leg_item.setPos(x, HEADER_HEIGHT + new_row * self.scene.cell_h)
         self.scene.addItem(leg_item)
 
+        # 6) persist to the database if a schedule is loaded
         if self.current_schedule_id:
             leg_item.db_id = self.db.insert_event(
                 self.current_schedule_id,
-                title, "",
-                a_end,
-                a_end.addSecs(dur_min * 60),
-                dur_min,
-                route_url, "", "",
-                mode, 0.0,
+                title,
+                "",
+                dt_start,
+                dt_end,
+                duration_minutes,
+                route_url,
+                "",
+                "",
+                mode,
+                0.0,
                 "#ADE1F9",
-                x, HEADER_HEIGHT + new_row * self.scene.cell_h,
-                self.scene.cell_w, h
+                x,
+                HEADER_HEIGHT + new_row * self.scene.cell_h,
+                self.scene.cell_w,
+                h,
             )
 
     def on_add_route(self):
