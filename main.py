@@ -3095,39 +3095,53 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Update Complete",
                                 f"Updated {updated} travel-time event" + ("s." if updated != 1 else "."))
 
+    def get_event_end_timestamp(self, event_item):
+        """Return the end time of ``event_item`` as a Unix timestamp."""
+        col = int((event_item.pos().x() - TIME_LABEL_WIDTH) // self.scene.cell_w)
+        row = int((event_item.pos().y() - HEADER_HEIGHT) // self.scene.cell_h)
+        day = self.scene.start_date.addDays(col)
+        mins = START_HOUR * 60 + row * self.scene.slot_minutes
+        start_dt = QDateTime(day, QTime(mins // 60, mins % 60))
+        end_dt = start_dt.addSecs(
+            int(event_item.rect().height() / self.scene.cell_h)
+            * self.scene.slot_minutes * 60
+        )
+        return end_dt.toSecsSinceEpoch()
+
+    def get_event_coordinates(self, event_item):
+        """Resolve ``event_item`` into ``(lat, lng)`` coordinates."""
+        if hasattr(event_item, "lat") and hasattr(event_item, "lng"):
+            return event_item.lat, event_item.lng
+
+        name = event_item.text.toPlainText().strip()
+        if event_item.city:
+            name += f", {event_item.city}"
+        if event_item.region:
+            name += f", {event_item.region}"
+
+        resp = self.gmaps.find_place(
+            input=name,
+            input_type="textquery",
+            fields=["geometry"],
+        )
+        cands = resp.get("candidates", [])
+        if cands:
+            loc = cands[0]["geometry"]["location"]
+            return loc["lat"], loc["lng"]
+
+        geo = self.gmaps.geocode(name)
+        if geo:
+            loc = geo[0]["geometry"]["location"]
+            return loc["lat"], loc["lng"]
+
+        raise RuntimeError(f"Could not resolve coords for “{name}”")
+
     def on_add_route(self):
-        # 1) helper to resolve lat/lng from an EventItem
-        def resolve_coords(ev: EventItem):
-            # if you manually attached lat/lng earlier via Add Place:
-            if hasattr(ev, 'lat') and hasattr(ev, 'lng'):
-                return ev.lat, ev.lng
-
-            # fall back to text‐query via Google Maps
-            name = ev.text.toPlainText().strip()
-            if ev.city:
-                name += f", {ev.city}"
-            if ev.region:
-                name += f", {ev.region}"
-
-            # try textquery → find_place
-            resp = self.gmaps.find_place(
-                input=name,
-                input_type="textquery",
-                fields=['geometry']
-            )
-            cands = resp.get('candidates', [])
-            if cands:
-                loc = cands[0]['geometry']['location']
-                return loc['lat'], loc['lng']
-
-            # last‐ditch: geocode
-            geo = self.gmaps.geocode(name)
-            if geo:
-                loc = geo[0]['geometry']['location']
-                return loc['lat'], loc['lng']
-
-            raise RuntimeError(f"Could not resolve coords for “{name}”")
-
+        # 1) require exactly two events selected
+        #
+        # ``get_event_coordinates`` and ``get_event_end_timestamp`` are helpers
+        # that resolve EventItem details.
+        #
         # 2) require exactly two events selected
         items = [it for it in self.scene.selectedItems() if isinstance(it, EventItem)]
         if len(items) != 2:
@@ -3138,23 +3152,15 @@ class MainWindow(QMainWindow):
 
         # 3) resolve origin & destination
         try:
-            lat1, lng1 = resolve_coords(a)
-            lat2, lng2 = resolve_coords(b)
+            lat1, lng1 = self.get_event_coordinates(a)
+            lat2, lng2 = self.get_event_coordinates(b)
         except RuntimeError as e:
             QMessageBox.critical(self, "Routing Error", str(e))
             return
 
-        # 1) figure out when event A ends:
-        #    (this is the same QDateTime you already compute for placing the leg)
-        col_a = int((a.pos().x() - TIME_LABEL_WIDTH) // self.scene.cell_w)
-        row_a = int((a.pos().y() - HEADER_HEIGHT) // self.scene.cell_h)
-        day = self.scene.start_date.addDays(col_a)
-        mins = START_HOUR * 60 + row_a * self.scene.slot_minutes
-        a_end = QDateTime(day, QTime(mins // 60, mins % 60)).addSecs(
-            int(a.rect().height() / self.scene.cell_h) * self.scene.slot_minutes * 60
-        )
-        # convert to a UNIX timestamp (seconds since epoch)
-        departure = a_end.toSecsSinceEpoch()
+        # 1) figure out when event A ends and convert to a UNIX timestamp
+        departure = self.get_event_end_timestamp(a)
+        a_end = QDateTime.fromSecsSinceEpoch(departure)
 
         modes = {
             "walking": {"label": "Walking", "params": {}},
