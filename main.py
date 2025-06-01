@@ -3024,9 +3024,9 @@ class MainWindow(QMainWindow):
             if not raw or "/dir/" not in raw:
                 continue
 
-            # expand short links
+            # expand short links via GET to ensure redirects are followed
             long_url = raw
-            if raw.startswith("https://maps.app.goo.gl/"):
+            if "maps.app.goo.gl" in raw:
                 long_url = expand_short_link(raw)
 
             p = urlparse(long_url)
