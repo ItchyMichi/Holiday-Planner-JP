@@ -3038,17 +3038,21 @@ class MainWindow(QMainWindow):
 
         updated = 0
         for ev in items:
-            raw = (ev.link or "").strip()
-            if not raw or "/dir/" not in raw:
+            raw = ev.link  # e.g. "https://maps.app.goo.gl/PyfeXm6hR6VEShDL6"
+            if not raw:
+                print(f"[DEBUG] Skipping item because no link: link='{raw}'")
                 continue
 
-            # expand short links via GET to ensure redirects are followed
-            long_url = raw
-            if "maps.app.goo.gl" in raw:
-                long_url = expand_short_link(raw)
+            # ─── ① Expand ANY short link or consent redirect ────────────
+            if raw.startswith("https://maps.app.goo.gl"):
+                long_url = expand_and_unwrap_consent(raw)
+            else:
+                # Even if it’s already a google.com URL, it might be a consent wrapper, so still unwrap:
+                long_url = expand_and_unwrap_consent(raw)
 
+            # ─── ② Now reject if it doesn’t contain '/maps/dir/' ─────────
             if "/maps/dir/" not in long_url:
-                QMessageBox.warning(self, "Invalid Link", f"Not a directions link: {raw}")
+                print(f"[DEBUG] Skipping item because not a directions-link: link='{raw}'  expanded_to='{long_url}'")
                 continue
 
             p = urlparse(long_url)
