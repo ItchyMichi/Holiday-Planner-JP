@@ -2,6 +2,7 @@ import base64
 from datetime import datetime, time as dt_time
 import time
 import math
+from math import ceil
 import os
 import configparser
 import re
@@ -3092,15 +3093,16 @@ class MainWindow(QMainWindow):
                     continue
 
             # calculate and apply new duration
-            new_min = math.ceil(duration_sec / 60)
+            duration_min = ceil(duration_sec / 60)
             slot = self.scene.slot_minutes
             old_min = int((ev.rect().height() / self.scene.cell_h) * slot)
-            if new_min == old_min:
+            if duration_min == old_min:
                 continue
 
-            new_h = (new_min / slot) * self.scene.cell_h
+            new_h = (duration_min / slot) * self.scene.cell_h
             r = ev.rect()
             ev.setRect(QRectF(r.x(), r.y(), r.width(), new_h))
+            ev.duration = duration_min
 
             if getattr(ev, "db_id", None):
                 x = ev.pos().x();
@@ -3110,9 +3112,9 @@ class MainWindow(QMainWindow):
                 day = self.scene.start_date.addDays(col)
                 mins = START_HOUR * 60 + row * slot
                 start_dt = QDateTime(day, QTime(mins // 60, mins % 60))
-                end_dt = start_dt.addSecs(new_min * 60)
+                end_dt = start_dt.addSecs(duration_min * 60)
                 self.db.update_event(ev.db_id,
-                                     duration=new_min,
+                                     duration=duration_min,
                                      end_dt=end_dt,
                                      h=new_h)
                 self._reload_location_views()
@@ -3212,7 +3214,7 @@ class MainWindow(QMainWindow):
 
         # 2) duration
         duration_secs = route_info.get("duration", 0)
-        duration_minutes = math.ceil(duration_secs / 60)
+        duration_minutes = ceil(duration_secs / 60)
 
         # 3) compute end time
         dt_end = dt_start.addSecs(duration_secs)
