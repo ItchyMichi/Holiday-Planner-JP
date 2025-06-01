@@ -3290,6 +3290,138 @@ class MainWindow(QMainWindow):
             avoid_highways, avoid_tolls
         )
 
+    def update_event_title(self):
+        ev = self.current_event
+        if not ev:
+            return
+        new = self.titleEdit.text()
+        for p in [ev] + ev.linked_items:
+            p.set_title(new)
+            if getattr(p, 'db_id', None):
+                self.db.update_event(p.db_id, title=new)
+                self._reload_location_views()
+
+    def update_event_link(self):
+        ev = self.current_event
+        if not ev:
+            return
+        new = self.linkEdit.text()
+        for p in [ev] + ev.linked_items:
+            p.link = new
+            if getattr(p, 'db_id', None):
+                self.db.update_event(p.db_id, link=new)
+                self._reload_location_views()
+
+    def update_event_description(self):
+        ev = self.current_event
+        if not ev:
+            return
+        new = self.descriptionEdit.text()
+        for part in [ev] + ev.linked_items:
+            part.description = new
+            if getattr(part, 'db_id', None):
+                self.db.update_event(part.db_id, description=new)
+                self._reload_location_views()
+
+    def update_event_city(self):
+        ev = self.current_event
+        if not ev:
+            return
+        new = self.cityEdit.text()
+        for p in [ev] + ev.linked_items:
+            p.city = new
+            if getattr(p, 'db_id', None):
+                self.db.update_event(p.db_id, city=new)
+                self._reload_location_views()
+
+    def update_event_region(self):
+        ev = self.current_event
+        if not ev:
+            return
+        new = self.regionEdit.text()
+        for p in [ev] + ev.linked_items:
+            p.region = new
+            if getattr(p, 'db_id', None):
+                self.db.update_event(p.db_id, region=new)
+                self._reload_location_views()
+
+    def update_event_type(self):
+        ev = self.current_event
+        if not ev:
+            return
+        new = self.typeEdit.text()
+        for p in [ev] + ev.linked_items:
+            p.event_type = new
+            if getattr(p, 'db_id', None):
+                self.db.update_event(p.db_id, event_type=new)
+                self._reload_location_views()
+
+    def update_event_cost(self, v):
+        ev = self.current_event
+        if not ev:
+            return
+        for p in [ev] + ev.linked_items:
+            p.cost = v
+            if getattr(p, 'db_id', None):
+                self.db.update_event(p.db_id, cost=v)
+                self._reload_location_views()
+
+    def choose_event_color(self):
+        ev = self.current_event
+        if not ev:
+            return
+        col = QColorDialog.getColor(ev.color, self, "Choose Event Color")
+        if col.isValid():
+            for p in [ev] + ev.linked_items:
+                p.color = col
+                p.setBrush(QBrush(col))
+                if getattr(p, 'db_id', None):
+                    self.db.update_event(p.db_id, color=col.name())
+                    self._reload_location_views()
+            self.colorBtn.setStyleSheet(f"background-color:{col.name()}")
+
+    def update_event_time(self):
+        ev = self.current_event
+        if not ev:
+            return
+        dt = self.startEdit.dateTime()
+        col = self.scene.start_date.daysTo(dt.date())
+        row = (
+            dt.time().hour() * 60 + dt.time().minute() - START_HOUR * 60
+        ) // self.scene.slot_minutes
+        x = TIME_LABEL_WIDTH + col * self.scene.cell_w
+        y = HEADER_HEIGHT + row * self.scene.cell_h
+        ev.setPos(x, y)
+        if getattr(ev, 'db_id', None):
+            self.db.update_event(ev.db_id, start_dt=dt, x=x, y=y)
+        new_dur = dt.secsTo(self.endEdit.dateTime()) // 60
+        self.durationSpin.setValue(new_dur)
+        if getattr(ev, 'db_id', None):
+            self.db.update_event(
+                ev.db_id,
+                duration=new_dur,
+                end_dt=self.endEdit.dateTime(),
+            )
+            self._reload_location_views()
+
+    def update_event_duration(self, minutes):
+        ev = self.current_event
+        if not ev:
+            return
+        slots = minutes / self.scene.slot_minutes
+        h = slots * self.scene.cell_h
+        r = ev.rect()
+        ev.setRect(QRectF(r.x(), r.y(), r.width(), h))
+
+        # 2) persist *all* changed fields in one go
+        self.db.update_event(
+            ev.db_id,
+            duration=minutes,
+            end_dt=self.endEdit.dateTime(),
+            h=h,
+        )
+        self._reload_location_views()
+
 class RouteOptionsDialog(QDialog):
     def __init__(self, parent, eventA, eventB):
         super().__init__(parent)
@@ -4604,122 +4736,6 @@ class RouteOptionsDialog(QDialog):
         for w in widgets: w.blockSignals(False)
         self._handling_selection = False
 
-    def update_event_title(self):
-        ev = self.current_event
-        if not ev: return
-        new = self.titleEdit.text()
-        for p in [ev] + ev.linked_items:
-            p.set_title(new)
-            if getattr(p, 'db_id', None):
-                self.db.update_event(p.db_id, title=new)
-                self._reload_location_views()
-
-    def update_event_link(self):
-        ev = self.current_event
-        if not ev: return
-        new = self.linkEdit.text()
-        for p in [ev] + ev.linked_items:
-            p.link = new
-            if getattr(p, 'db_id', None):
-                self.db.update_event(p.db_id, link=new)
-                self._reload_location_views()
-
-    def update_event_description(self):
-        ev = self.current_event
-        if not ev:
-            return
-        new = self.descriptionEdit.text()
-        for part in [ev] + ev.linked_items:
-            part.description = new
-            if getattr(part, 'db_id', None):
-                self.db.update_event(part.db_id, description=new)
-                self._reload_location_views()
-
-    def update_event_city(self):
-        ev = self.current_event
-        if not ev: return
-        new = self.cityEdit.text()
-        for p in [ev] + ev.linked_items:
-            p.city = new
-            if getattr(p, 'db_id', None):
-                self.db.update_event(p.db_id, city=new)
-                self._reload_location_views()
-
-    def update_event_region(self):
-        ev = self.current_event
-        if not ev: return
-        new = self.regionEdit.text()
-        for p in [ev] + ev.linked_items:
-            p.region = new
-            if getattr(p, 'db_id', None):
-                self.db.update_event(p.db_id, region=new)
-                self._reload_location_views()
-
-    def update_event_type(self):
-        ev = self.current_event
-        if not ev: return
-        new = self.typeEdit.text()
-        for p in [ev] + ev.linked_items:
-            p.event_type = new
-            if getattr(p, 'db_id', None):
-                self.db.update_event(p.db_id, event_type=new)
-                self._reload_location_views()
-
-    def update_event_cost(self, v):
-        ev = self.current_event
-        if not ev: return
-        for p in [ev] + ev.linked_items:
-            p.cost = v
-            if getattr(p, 'db_id', None):
-                self.db.update_event(p.db_id, cost=v)
-                self._reload_location_views()
-
-    def choose_event_color(self):
-        ev = self.current_event
-        if not ev: return
-        col = QColorDialog.getColor(ev.color, self, "Choose Event Color")
-        if col.isValid():
-            for p in [ev] + ev.linked_items:
-                p.color = col
-                p.setBrush(QBrush(col))
-                if getattr(p, 'db_id', None):
-                    self.db.update_event(p.db_id, color=col.name())
-                    self._reload_location_views()
-            self.colorBtn.setStyleSheet(f"background-color:{col.name()}")
-
-    def update_event_time(self):
-        ev = self.current_event
-        if not ev: return
-        dt = self.startEdit.dateTime()
-        col = self.scene.start_date.daysTo(dt.date())
-        row = (dt.time().hour()*60 + dt.time().minute() - START_HOUR*60)//self.scene.slot_minutes
-        x = TIME_LABEL_WIDTH + col*self.scene.cell_w
-        y = HEADER_HEIGHT + row*self.scene.cell_h
-        ev.setPos(x, y)
-        if getattr(ev, 'db_id', None):
-            self.db.update_event(ev.db_id, start_dt=dt, x=x, y=y)
-        new_dur = dt.secsTo(self.endEdit.dateTime())//60
-        self.durationSpin.setValue(new_dur)
-        if getattr(ev, 'db_id', None):
-            self.db.update_event(ev.db_id, duration=new_dur, end_dt=self.endEdit.dateTime())
-            self._reload_location_views()
-
-    def update_event_duration(self, minutes):
-        ev = self.current_event
-        if not ev: return
-        slots = minutes / self.scene.slot_minutes
-        h = slots * self.scene.cell_h
-        r = ev.rect()
-        ev.setRect(QRectF(r.x(), r.y(), r.width(), h))
-
-        # 2) persist *all* changed fields in one go
-        self.db.update_event(
-            ev.db_id,
-            duration=minutes,
-            end_dt=self.endEdit.dateTime(),
-            h=h
-        )
-        self._reload_location_views()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
