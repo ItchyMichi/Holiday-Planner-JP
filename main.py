@@ -3492,8 +3492,16 @@ class MainWindow(QMainWindow):
                 # a route-link → grab both ends
                 origin = qs.get("origin", [None])[0]
                 dest = qs.get("destination", [None])[0]
-                if origin: points.append(origin)
-                if dest:   points.append(dest)
+                if not origin or not dest:
+                    parts = p.path.split("/")
+                    if "dir" in parts:
+                        idx = parts.index("dir")
+                        origin = origin or (parts[idx + 1] if len(parts) > idx + 1 else None)
+                        dest = dest or (parts[idx + 2] if len(parts) > idx + 2 else None)
+                if origin:
+                    points.append(origin)
+                if dest:
+                    points.append(dest)
 
             elif "/place/" in p.path:
                 # a place-link → q=place_id:XYZ
