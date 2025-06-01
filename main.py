@@ -3032,7 +3032,7 @@ class MainWindow(QMainWindow):
                 long_url = expand_short_link(raw)
 
             if "/maps/dir/" not in long_url:
-                # Not a directions link—skip this event
+                QMessageBox.warning(self, "Invalid Link", f"Not a directions link: {raw}")
                 continue
 
             p = urlparse(long_url)
@@ -3048,6 +3048,7 @@ class MainWindow(QMainWindow):
                     origin = origin or (parts[idx + 1] if len(parts) > idx + 1 else None)
                     dest = dest or (parts[idx + 2] if len(parts) > idx + 2 else None)
             if not origin or not dest:
+                QMessageBox.warning(self, "Parse Error", f"Cannot get origin/dest from {long_url}")
                 continue
 
             # choose mode based on the event type, not the URL
@@ -3075,14 +3076,14 @@ class MainWindow(QMainWindow):
                 if not resp:
                     QMessageBox.warning(
                         self,
-                        "No route",
-                        f"No {mode} route found from {origin} to {dest}"
+                        "No Route",
+                        f"No route from {origin} to {dest}"
                     )
                     continue
                 leg = resp[0]["legs"][0]
                 duration_sec = leg["duration"]["value"]
             except Exception as e:
-                QMessageBox.warning(self, "Error fetching directions", str(e))
+                QMessageBox.warning(self, "API Error", str(e))
                 continue
 
             # if transit was requested, ensure we got a transit leg
