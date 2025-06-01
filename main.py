@@ -91,6 +91,20 @@ from PyQt5.QtWidgets import QGraphicsView
 
 URL_RE = re.compile(r'https?://\S+')
 
+def expand_short_link(short_url):
+    """Perform a GET with redirects to expand any short maps.app.goo.gl link."""
+    try:
+        resp = requests.get(
+            short_url,
+            allow_redirects=True,
+            timeout=5,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        return resp.url
+    except Exception:
+        # If expansion fails, return the original URL
+        return short_url
+
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QFileDialog
 
 class TextImportDialog(QDialog):
@@ -3013,7 +3027,7 @@ class MainWindow(QMainWindow):
             # expand short links
             long_url = raw
             if raw.startswith("https://maps.app.goo.gl/"):
-                long_url = self.expand_link(raw)
+                long_url = expand_short_link(raw)
 
             p = urlparse(long_url)
             qs = parse_qs(p.query)
