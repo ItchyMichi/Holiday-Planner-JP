@@ -1,5 +1,6 @@
 import base64
-from datetime import datetime, time
+from datetime import datetime, time as dt_time
+import time
 import math
 import os
 import configparser
@@ -3068,13 +3069,20 @@ class MainWindow(QMainWindow):
                 kwargs["transit_mode"] = ["bus", "train"]
                 kwargs["departure_time"] = int(time.time())
 
-            resp = self.gmaps.directions(origin, dest, mode=mode, **kwargs)
-            if not resp:
-                QMessageBox.warning(self, "Directions Error",
-                                    f"No {mode} route found for:\n{ev.link}")
+            try:
+                resp = self.gmaps.directions(origin, dest, mode=mode, **kwargs)
+                if not resp:
+                    QMessageBox.warning(
+                        self,
+                        "No route",
+                        f"No {mode} route found from {origin} to {dest}"
+                    )
+                    continue
+                leg = resp[0]["legs"][0]
+                duration_sec = leg["duration"]["value"]
+            except Exception as e:
+                QMessageBox.warning(self, "Error fetching directions", str(e))
                 continue
-
-            leg = resp[0]["legs"][0]
 
             # if transit was requested, ensure we got a transit leg
             if mode in ("transit", "bus", "train"):
@@ -3084,7 +3092,7 @@ class MainWindow(QMainWindow):
                     continue
 
             # calculate and apply new duration
-            new_min = math.ceil(leg["duration"]["value"] / 60)
+            new_min = math.ceil(duration_sec / 60)
             slot = self.scene.slot_minutes
             old_min = int((ev.rect().height() / self.scene.cell_h) * slot)
             if new_min == old_min:
