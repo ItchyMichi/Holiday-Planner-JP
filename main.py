@@ -3029,6 +3029,10 @@ class MainWindow(QMainWindow):
             if "maps.app.goo.gl" in raw:
                 long_url = expand_short_link(raw)
 
+            if "/maps/dir/" not in long_url:
+                # Not a directions link—skip this event
+                continue
+
             p = urlparse(long_url)
             qs = parse_qs(p.query)
             origin = qs.get("origin", [None])[0]
