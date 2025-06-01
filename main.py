@@ -759,6 +759,7 @@ class DatabaseManager:
         return c.lastrowid
 
     def update_event(self, event_id, **fields):
+        print(f"[DEBUG update_event] event_id={event_id}, fields={fields}")
         sets, vals = [], []
         for key, val in fields.items():
             sets.append(f"{key} = ?")
@@ -770,6 +771,7 @@ class DatabaseManager:
                 vals.append(val)
         vals.append(event_id)
         stmt = f"UPDATE event SET {', '.join(sets)} WHERE id = ?"
+        print(f"[DEBUG update_event] stmt={stmt} vals={vals}")
         self.conn.cursor().execute(stmt, vals)
         self.conn.commit()
 
