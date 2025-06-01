@@ -3242,15 +3242,7 @@ class MainWindow(QMainWindow):
             f"&departure_time={departure}"
         )
 
-        # compute insert‐point:
-        col_a = int((a.pos().x() - TIME_LABEL_WIDTH) // self.scene.cell_w)
-        row_a = int((a.pos().y() - HEADER_HEIGHT) // self.scene.cell_h)
-        day = self.scene.start_date.addDays(col_a)
-        mins = START_HOUR * 60 + row_a * self.scene.slot_minutes
-        a_end = QDateTime(day, QTime(mins // 60, mins % 60)).addSecs(
-            int(a.rect().height() / self.scene.cell_h)
-            * self.scene.slot_minutes * 60
-        )
+        # compute insert‐point using the helper-derived end time
         new_col = self.scene.start_date.daysTo(a_end.date())
         new_row = ((a_end.time().hour() * 60 + a_end.time().minute()
                     - START_HOUR * 60) // self.scene.slot_minutes)
