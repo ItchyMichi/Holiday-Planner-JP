@@ -3422,177 +3422,6 @@ class MainWindow(QMainWindow):
         )
         self._reload_location_views()
 
-class RouteOptionsDialog(QDialog):
-    def __init__(self, parent, eventA, eventB):
-        super().__init__(parent)
-        self.setWindowTitle("Select Route Options")
-        self.resize(400, 500)
-
-        self.eventA = eventA
-        self.eventB = eventB
-
-        # Compute departure timestamp and coords right away
-        self.departure_ts = parent.get_event_end_timestamp(eventA)
-        self.lat1, self.lng1 = parent.get_event_coordinates(eventA)
-        self.lat2, self.lng2 = parent.get_event_coordinates(eventB)
-
-        # State for avoid options
-        self.avoid_highways = False
-        self.avoid_tolls = False
-
-        # Fetch initial routes
-        self.all_routes = parent.fetch_all_routes(
-            self.lat1, self.lng1, self.lat2, self.lng2, self.departure_ts,
-            avoid_highways=self.avoid_highways, avoid_tolls=self.avoid_tolls
-        )
-
-        self._build_ui()
-        self._populate_mode_summary()
-        self._populate_route_list()
-
-    def _build_ui(self):
-        layout = QVBoxLayout()
-
-        # 1) Show departure time
-        dt = QDateTime.fromSecsSinceEpoch(self.departure_ts)
-        dt_label = QLabel(f"Departure: {dt.toString('yyyy-MM-dd hh:mm')}")
-        layout.addWidget(dt_label)
-
-        # 2) Mode selection (radio buttons)
-        mode_group_box = QGroupBox("Travel Mode")
-        mode_layout = QVBoxLayout()
-        self.mode_button_group = QButtonGroup()
-        self.rb_driving = QRadioButton("Driving")
-        self.rb_transit = QRadioButton("Transit")
-        self.rb_walking = QRadioButton("Walking")
-        self.mode_button_group.addButton(self.rb_driving, 0)
-        self.mode_button_group.addButton(self.rb_transit, 1)
-        self.mode_button_group.addButton(self.rb_walking, 2)
-        mode_layout.addWidget(self.rb_driving)
-        mode_layout.addWidget(self.rb_transit)
-        mode_layout.addWidget(self.rb_walking)
-        mode_group_box.setLayout(mode_layout)
-        layout.addWidget(mode_group_box)
-
-        # Default to Driving if available, else Transit, else Walking
-        if self.all_routes['driving']:
-            self.rb_driving.setChecked(True)
-        elif self.all_routes['transit']:
-            self.rb_transit.setChecked(True)
-        else:
-            self.rb_walking.setChecked(True)
-
-        # Connect mode change to list refresh
-        self.mode_button_group.buttonClicked.connect(self._populate_route_list)
-
-        # 3) Avoid checkboxes (only relevant when Driving is selected)
-        self.cb_avoid_highways = QCheckBox("Avoid Highways")
-        self.cb_avoid_tolls = QCheckBox("Avoid Tolls")
-        self.cb_avoid_highways.stateChanged.connect(self._on_avoid_changed)
-        self.cb_avoid_tolls.stateChanged.connect(self._on_avoid_changed)
-        layout.addWidget(self.cb_avoid_highways)
-        layout.addWidget(self.cb_avoid_tolls)
-
-        # 4) Summary label (brief summary of fastest option in each mode)
-        self.summary_label = QLabel("")
-        layout.addWidget(self.summary_label)
-
-        # 5) List of alternative routes for chosen mode
-        self.route_list = QListWidget()
-        layout.addWidget(self.route_list)
-
-        # 6) Confirm / Cancel buttons
-        btn_layout = QHBoxLayout()
-        self.btn_confirm = QPushButton("Confirm")
-        self.btn_cancel = QPushButton("Cancel")
-        self.btn_confirm.clicked.connect(self.accept)
-        self.btn_cancel.clicked.connect(self.reject)
-        btn_layout.addWidget(self.btn_confirm)
-        btn_layout.addWidget(self.btn_cancel)
-        layout.addLayout(btn_layout)
-
-        self.setLayout(layout)
-
-    def _on_avoid_changed(self):
-        # Update state and re-fetch driving routes if Driving is selected
-        self.avoid_highways = self.cb_avoid_highways.isChecked()
-        self.avoid_tolls = self.cb_avoid_tolls.isChecked()
-
-        if self.rb_driving.isChecked():
-            # Re-fetch all routes with new avoid options
-            self.all_routes = self.parent().fetch_all_routes(
-                self.lat1, self.lng1, self.lat2, self.lng2,
-                self.departure_ts,
-                avoid_highways=self.avoid_highways,
-                avoid_tolls=self.avoid_tolls
-            )
-            self._populate_mode_summary()
-            self._populate_route_list()
-
-    def _populate_mode_summary(self):
-        # Show: “Driving: 20 min  / Transit: 30 min / Walking: 1h10m”
-        parts = []
-        for mode in ['driving', 'transit', 'walking']:
-            lst = self.all_routes.get(mode, [])
-            if lst:
-                fastest = min(lst, key=lambda r: r['duration'])
-                dur_min = fastest['duration'] // 60
-                label = mode.capitalize()
-                parts.append(f"{label}: {dur_min} min")
-            else:
-                parts.append(f"{mode.capitalize()}: N/A")
-        self.summary_label.setText("  ||  ".join(parts))
-
-    def _populate_route_list(self):
-        """
-        Fill self.route_list with the alternatives for the currently selected mode.
-        Each QListWidgetItem’s text is something like:
-          “20 min (5 km) – via I-90”
-        Store the full route‑dict in item.setData(Qt.UserRole, route_dict)
-        """
-        self.route_list.clear()
-        if self.rb_driving.isChecked():
-            mode = 'driving'
-        elif self.rb_transit.isChecked():
-            mode = 'transit'
-        else:
-            mode = 'walking'
-
-        for route in self.all_routes.get(mode, []):
-            mins = route['duration'] // 60
-            km = route['distance'] / 1000
-            summary = route['summary']
-            text = f"{mins} min ({km:.1f} km) – {summary}"
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, route)
-            self.route_list.addItem(item)
-
-        # If none, disable Confirm button
-        self.btn_confirm.setEnabled(self.route_list.count() > 0)
-
-    def get_selected_route(self):
-        """
-        Return a tuple (mode, route_dict, avoid_highways, avoid_tolls).
-        Must be called after exec_() and only if accepted().
-        """
-        # Determine mode
-        if self.rb_driving.isChecked():
-            mode = 'driving'
-        elif self.rb_transit.isChecked():
-            mode = 'transit'
-        else:
-            mode = 'walking'
-
-        item = self.route_list.currentItem()
-        if not item:
-            return None
-        route = item.data(Qt.UserRole)
-        return {
-            'mode': mode,
-            'route': route,
-            'avoid_highways': self.avoid_highways,
-            'avoid_tolls': self.avoid_tolls
-        }
 
     def on_add_place(self):
         # 1) Require exactly one event selected
@@ -4737,6 +4566,177 @@ class RouteOptionsDialog(QDialog):
         self._handling_selection = False
 
 
+class RouteOptionsDialog(QDialog):
+    def __init__(self, parent, eventA, eventB):
+        super().__init__(parent)
+        self.setWindowTitle("Select Route Options")
+        self.resize(400, 500)
+
+        self.eventA = eventA
+        self.eventB = eventB
+
+        # Compute departure timestamp and coords right away
+        self.departure_ts = parent.get_event_end_timestamp(eventA)
+        self.lat1, self.lng1 = parent.get_event_coordinates(eventA)
+        self.lat2, self.lng2 = parent.get_event_coordinates(eventB)
+
+        # State for avoid options
+        self.avoid_highways = False
+        self.avoid_tolls = False
+
+        # Fetch initial routes
+        self.all_routes = parent.fetch_all_routes(
+            self.lat1, self.lng1, self.lat2, self.lng2, self.departure_ts,
+            avoid_highways=self.avoid_highways, avoid_tolls=self.avoid_tolls
+        )
+
+        self._build_ui()
+        self._populate_mode_summary()
+        self._populate_route_list()
+
+    def _build_ui(self):
+        layout = QVBoxLayout()
+
+        # 1) Show departure time
+        dt = QDateTime.fromSecsSinceEpoch(self.departure_ts)
+        dt_label = QLabel(f"Departure: {dt.toString('yyyy-MM-dd hh:mm')}")
+        layout.addWidget(dt_label)
+
+        # 2) Mode selection (radio buttons)
+        mode_group_box = QGroupBox("Travel Mode")
+        mode_layout = QVBoxLayout()
+        self.mode_button_group = QButtonGroup()
+        self.rb_driving = QRadioButton("Driving")
+        self.rb_transit = QRadioButton("Transit")
+        self.rb_walking = QRadioButton("Walking")
+        self.mode_button_group.addButton(self.rb_driving, 0)
+        self.mode_button_group.addButton(self.rb_transit, 1)
+        self.mode_button_group.addButton(self.rb_walking, 2)
+        mode_layout.addWidget(self.rb_driving)
+        mode_layout.addWidget(self.rb_transit)
+        mode_layout.addWidget(self.rb_walking)
+        mode_group_box.setLayout(mode_layout)
+        layout.addWidget(mode_group_box)
+
+        # Default to Driving if available, else Transit, else Walking
+        if self.all_routes['driving']:
+            self.rb_driving.setChecked(True)
+        elif self.all_routes['transit']:
+            self.rb_transit.setChecked(True)
+        else:
+            self.rb_walking.setChecked(True)
+
+        # Connect mode change to list refresh
+        self.mode_button_group.buttonClicked.connect(self._populate_route_list)
+
+        # 3) Avoid checkboxes (only relevant when Driving is selected)
+        self.cb_avoid_highways = QCheckBox("Avoid Highways")
+        self.cb_avoid_tolls = QCheckBox("Avoid Tolls")
+        self.cb_avoid_highways.stateChanged.connect(self._on_avoid_changed)
+        self.cb_avoid_tolls.stateChanged.connect(self._on_avoid_changed)
+        layout.addWidget(self.cb_avoid_highways)
+        layout.addWidget(self.cb_avoid_tolls)
+
+        # 4) Summary label (brief summary of fastest option in each mode)
+        self.summary_label = QLabel("")
+        layout.addWidget(self.summary_label)
+
+        # 5) List of alternative routes for chosen mode
+        self.route_list = QListWidget()
+        layout.addWidget(self.route_list)
+
+        # 6) Confirm / Cancel buttons
+        btn_layout = QHBoxLayout()
+        self.btn_confirm = QPushButton("Confirm")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_confirm.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_confirm)
+        btn_layout.addWidget(self.btn_cancel)
+        layout.addLayout(btn_layout)
+
+        self.setLayout(layout)
+
+    def _on_avoid_changed(self):
+        # Update state and re-fetch driving routes if Driving is selected
+        self.avoid_highways = self.cb_avoid_highways.isChecked()
+        self.avoid_tolls = self.cb_avoid_tolls.isChecked()
+
+        if self.rb_driving.isChecked():
+            # Re-fetch all routes with new avoid options
+            self.all_routes = self.parent().fetch_all_routes(
+                self.lat1, self.lng1, self.lat2, self.lng2,
+                self.departure_ts,
+                avoid_highways=self.avoid_highways,
+                avoid_tolls=self.avoid_tolls
+            )
+            self._populate_mode_summary()
+            self._populate_route_list()
+
+    def _populate_mode_summary(self):
+        # Show: “Driving: 20 min  / Transit: 30 min / Walking: 1h10m”
+        parts = []
+        for mode in ['driving', 'transit', 'walking']:
+            lst = self.all_routes.get(mode, [])
+            if lst:
+                fastest = min(lst, key=lambda r: r['duration'])
+                dur_min = fastest['duration'] // 60
+                label = mode.capitalize()
+                parts.append(f"{label}: {dur_min} min")
+            else:
+                parts.append(f"{mode.capitalize()}: N/A")
+        self.summary_label.setText("  ||  ".join(parts))
+
+    def _populate_route_list(self):
+        """
+        Fill self.route_list with the alternatives for the currently selected mode.
+        Each QListWidgetItem’s text is something like:
+          “20 min (5 km) – via I-90”
+        Store the full route‑dict in item.setData(Qt.UserRole, route_dict)
+        """
+        self.route_list.clear()
+        if self.rb_driving.isChecked():
+            mode = 'driving'
+        elif self.rb_transit.isChecked():
+            mode = 'transit'
+        else:
+            mode = 'walking'
+
+        for route in self.all_routes.get(mode, []):
+            mins = route['duration'] // 60
+            km = route['distance'] / 1000
+            summary = route['summary']
+            text = f"{mins} min ({km:.1f} km) – {summary}"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, route)
+            self.route_list.addItem(item)
+
+        # If none, disable Confirm button
+        self.btn_confirm.setEnabled(self.route_list.count() > 0)
+
+    def get_selected_route(self):
+        """
+        Return a tuple (mode, route_dict, avoid_highways, avoid_tolls).
+        Must be called after exec_() and only if accepted().
+        """
+        # Determine mode
+        if self.rb_driving.isChecked():
+            mode = 'driving'
+        elif self.rb_transit.isChecked():
+            mode = 'transit'
+        else:
+            mode = 'walking'
+
+        item = self.route_list.currentItem()
+        if not item:
+            return None
+        route = item.data(Qt.UserRole)
+        return {
+            'mode': mode,
+            'route': route,
+            'avoid_highways': self.avoid_highways,
+            'avoid_tolls': self.avoid_tolls
+        }
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = MainWindow()
